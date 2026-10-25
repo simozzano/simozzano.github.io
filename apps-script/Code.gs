@@ -11,7 +11,7 @@
  * Dopo ogni modifica a questo file: Distribuisci → Gestisci distribuzioni →
  * modifica → Nuova versione.
  */
-const TOKEN = 'CAMBIA-QUESTA-STRINGA';
+const TOKEN = 'Zanucci.94';
 const SHEETS = ['Spese', 'Storico', 'Categorie', 'Impostazioni', 'Persone', 'PesiAnnuali'];
 const DATE_COLS = { Spese: [1], Storico: [2], Persone: [4] }; // colonne (1-based) con date
 const DATE_FMT = 'dd/mm/yyyy';
