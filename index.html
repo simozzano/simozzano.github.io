@@ -697,7 +697,21 @@ function buildSheets(state, versione, now) {
 }
 async function serialize(state, versione, JSZipLib, now) { return writeXlsx(buildSheets(state, versione, now), JSZipLib); }
 
-const API = { defaultColor, findCat, contaRiparto, MESI, MESI_LUNGHI, pad, isoToSerial, serialToIso, todayIso, parseDateAny, fmtDate, parseNum, round2, norm, readXlsx, writeXlsx, parseWorkbook, riassunto, daGiustificare, checkDuplicati, DUP_OVERRIDE, riparto, archivia, mesiConsiderati, buildSheets, serialize, newId, SHEETS_IMPOSTAZIONI };
+/* righe dei soli fogli-dati in forma semplice (valori/date), per la sincronizzazione con Google Sheet */
+const REMOTE_SHEETS = ['Spese', 'Storico', 'Categorie', 'Impostazioni', 'Persone', 'PesiAnnuali'];
+function plainCell(c) {
+  if (c == null) return null;
+  if (typeof c !== 'object') return c;
+  if (c.d) return { date: c.d };
+  return c.v == null || c.v === '' ? null : c.v;
+}
+function remoteSheets(state, now) {
+  const out = {};
+  for (const sh of buildSheets(state, 'simone', now)) if (REMOTE_SHEETS.includes(sh.name)) out[sh.name] = sh.rows.map(r => (r || []).map(plainCell));
+  return out;
+}
+
+const API = { remoteSheets, defaultColor, findCat, contaRiparto, MESI, MESI_LUNGHI, pad, isoToSerial, serialToIso, todayIso, parseDateAny, fmtDate, parseNum, round2, norm, readXlsx, writeXlsx, parseWorkbook, riassunto, daGiustificare, checkDuplicati, DUP_OVERRIDE, riparto, archivia, mesiConsiderati, buildSheets, serialize, newId, SHEETS_IMPOSTAZIONI };
 if (typeof module !== 'undefined' && module.exports) module.exports = API; else root.Core = API;
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
@@ -717,7 +731,7 @@ const inum = v => v == null ? '' : String(v).replace('.', ',');
 const byName = (a, b) => a.localeCompare(b, 'it');
 
 let S = null;
-const ui = { page: 'riassunto', fileName: '', handle: null, canWrite: false, dirty: false, fil: { cat: '', mese: '', pagato: '', min: '', max: '' }, limit: 200, form: null, edit: null, landing: {}, bytes: null, stale: true };
+const ui = { page: 'riassunto', fileName: '', handle: null, canWrite: false, dirty: false, remote: false, rev: null, ver: 0, saveErr: false, conflict: false,fil: { cat: '', mese: '', pagato: '', min: '', max: '' }, limit: 200, form: null, edit: null, landing: {}, bytes: null, stale: true };
 const isLaura = () => !!S && lsGet('profilo') === 'laura';
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
@@ -737,9 +751,10 @@ async function persistLocal() {
   try { const bytes = await refreshBytes(); await kvSet('last', { name: ui.fileName, bytes, dirty: ui.dirty, ts: Date.now() }); } catch (e) { console.warn(e); }
 }
 function scheduleAutosave() { clearTimeout(autoT); autoT = setTimeout(() => save(true), 900); }
+const autoMode = () => ui.remote || !!(ui.handle && ui.canWrite);
 function commit(msg) {
-  ui.dirty = true; ui.stale = true; renderTop(); renderMain(); schedulePersist();
-  if (ui.handle && ui.canWrite) scheduleAutosave();
+  ui.dirty = true; ui.stale = true; ui.ver++; ui.saveErr = false; renderTop(); renderMain(); schedulePersist();
+  if (autoMode() && !ui.conflict) scheduleAutosave();
   if (msg) toast(msg);
 }
 async function exportBytes(bytes, name) {
@@ -754,6 +769,7 @@ async function exportBytes(bytes, name) {
 async function save(auto) {
   if (!S) return;
   clearTimeout(autoT);
+  if (ui.remote) return remoteSave(auto);
   const bytes = (!ui.stale && ui.bytes) ? ui.bytes : await refreshBytes();
   if (ui.handle && ui.canWrite) {
     try {
@@ -763,13 +779,79 @@ async function save(auto) {
   }
   if (await exportBytes(bytes, ui.fileName || 'spese_familia.xlsx')) { ui.dirty = false; renderTop(); persistLocal(); }
 }
-async function loadBuffer(buf, name, handle, can, dirty) {
-  try { S = C.parseWorkbook(await C.readXlsx(buf)); S.meta.versione = 'simone'; } catch (e) { S = null; toast(e.message || 'File non leggibile'); renderAll(); return false; }
-  Object.assign(ui, { fileName: name, handle: handle || null, canWrite: !!can, dirty: !!dirty, page: 'riassunto', form: newForm(), edit: null, limit: 200, fil: { cat: '', mese: '', pagato: '', min: '', max: '' } });
-  if (handle) kvSet('handle', handle).catch(() => {});
+function adoptState(st, over) {
+  S = st; S.meta.versione = 'simone';
+  Object.assign(ui, { remote: false, rev: null, saveErr: false, conflict: false, page: 'riassunto', form: newForm(), edit: null, limit: 200, fil: { cat: '', mese: '', pagato: '', min: '', max: '' } }, over);
   persistLocal(); renderAll(); window.scrollTo(0, 0);
   if (!lsGet('profilo')) askProfile();
+}
+async function loadBuffer(buf, name, handle, can, dirty) {
+  let st;
+  try { st = C.parseWorkbook(await C.readXlsx(buf)); } catch (e) { S = null; toast(e.message || 'File non leggibile'); renderAll(); return false; }
+  adoptState(st, { fileName: name, handle: handle || null, canWrite: !!can, dirty: !!dirty });
+  if (handle) kvSet('handle', handle).catch(() => {});
   return true;
+}
+
+/* ------------------------------------------------------------ Google Sheet (Apps Script) */
+const gsCfg = () => ({ url: lsGet('gsUrl') || '', token: lsGet('gsToken') || '' });
+async function gsRequest(init) {
+  const { url, token } = gsCfg();
+  const r = init ? await fetch(url, init(token)) : await fetch(url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token));
+  let j; try { j = await r.json(); } catch (e) { throw new Error('Risposta non valida: controlla l\'URL del Google Sheet'); }
+  if (j.error) throw new Error(j.error);
+  return j;
+}
+function gsParse(j) {
+  const wb = {};
+  for (const [n, sh] of Object.entries(j.sheets || {})) wb[n] = { state: sh.state, rows: sh.rows.map(r => { r = r.map(v => v === '' ? null : v); while (r.length && r[r.length - 1] == null) r.pop(); return r; }) };
+  return C.parseWorkbook(wb);
+}
+async function remoteLoad() {
+  try {
+    const j = await gsRequest();
+    adoptState(gsParse(j), { remote: true, rev: j.rev, fileName: 'Google Sheet', handle: null, canWrite: false, dirty: false });
+    return true;
+  } catch (e) { S = null; toast(e.message || 'Impossibile aprire il Google Sheet'); renderAll(); return false; }
+}
+let saving = false;
+async function remoteSave(auto, force) {
+  if (saving) return;
+  saving = true; ui.saveErr = false; renderTop();
+  const v = ui.ver;
+  try {
+    const j = await gsRequest(token => ({ method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ token, baseRev: force ? null : ui.rev, sheets: C.remoteSheets(S) }) }));
+    if (j.conflict) { ui.conflict = true; conflictModal(); }
+    else { ui.rev = j.rev; ui.dirty = ui.ver !== v; if (!auto) toast('Salvato su Google Sheet'); }
+  } catch (e) { ui.saveErr = true; toast('Salvataggio non riuscito: ' + (e.message || 'rete assente')); }
+  saving = false; renderTop(); persistLocal();
+  if (ui.dirty && !ui.saveErr && !ui.conflict) scheduleAutosave();
+}
+async function remoteRefresh() {
+  if (!S || !ui.remote || ui.dirty || saving || ui.edit || $('#scrim')) return;
+  try {
+    const j = await gsRequest();
+    if (j.rev === ui.rev || ui.dirty || saving) return;
+    S = gsParse(j); S.meta.versione = 'simone'; ui.rev = j.rev; ui.stale = true;
+    renderTop(); renderMain(); toast('Aggiornato dal Google Sheet');
+  } catch (e) { /* offline: si riprova al prossimo rientro */ }
+}
+function conflictModal() {
+  openModal('<div class="sec-h" style="margin-top:0"><h2>Foglio modificato altrove</h2></div><p style="margin:0 0 14px">Il Google Sheet è cambiato dopo che l\'hai aperto (probabilmente l\'altra persona ha salvato). Puoi ricaricare i dati più recenti, perdendo le tue ultime modifiche, oppure sovrascrivere il foglio con la tua versione.</p>'
+    + '<div class="acts"><button class="btn grow" data-act="gsReload">Ricarica dal foglio</button><button class="btn sec grow" data-act="gsForce">Sovrascrivi</button></div>');
+}
+function gsSetup() {
+  const c = gsCfg();
+  openModal('<div class="sec-h" style="margin-top:0"><h2>Collega Google Sheet</h2></div>'
+    + '<div><label class="l" for="gsUrlIn">URL della web app (Apps Script)</label><input class="in" id="gsUrlIn" type="text" autocomplete="off" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec" value="' + h(c.url) + '"></div>'
+    + '<div style="margin-top:10px"><label class="l" for="gsTokenIn">Token</label><input class="in" id="gsTokenIn" type="text" autocomplete="off" autocapitalize="off" value="' + h(c.token) + '"></div>'
+    + '<p class="muted small">URL e token restano solo su questo dispositivo.</p>'
+    + '<div class="acts"><button class="btn grow" data-act="gsSave">Collega e apri</button><button class="btn sec grow" data-act="closeModal">Annulla</button></div>');
+}
+async function gsSave() {
+  const u = ($('#gsUrlIn').value || '').trim(), t = ($('#gsTokenIn').value || '').trim();
+  if (!/^https:\/\//.test(u) || !t) { toast('Inserisci URL (https://…) e token'); return; }
+  lsSet('gsUrl', u); lsSet('gsToken', t); closeModal(); await remoteLoad();
 }
 async function openPicker() {
   if (window.showOpenFilePicker) {
@@ -814,11 +896,11 @@ function renderAll() {
 }
 function renderTop() {
   const top = $('#top'); if (!top || !S) return;
-  const auto = ui.handle && ui.canWrite;
-  const st = ui.dirty ? (auto ? 'Salvataggio in corso…' : 'Modifiche non salvate') : (auto ? 'Salvato nel file' : 'Aggiornato');
+  const auto = autoMode();
+  const st = ui.dirty ? (auto && !ui.saveErr && !ui.conflict ? 'Salvataggio in corso…' : 'Modifiche non salvate') : (auto ? (ui.remote ? 'Salvato su Google Sheet' : 'Salvato nel file') : 'Aggiornato');
   top.innerHTML = '<div class="brand">Conti di casa</div>'
     + '<div class="file"><span class="dot ' + (ui.dirty ? 'dirty' : '') + '" aria-hidden="true"></span><span class="small">' + st + '</span><b title="' + h(ui.fileName) + '">' + h(ui.fileName) + '</b><button class="badge" data-act="askProfile" title="Cambia profilo su questo dispositivo" style="cursor:pointer;color:inherit">' + (isLaura() ? 'Laura' : 'Simone') + '</button></div>'
-    + '<button class="btn sm ' + (ui.dirty && !auto ? 'attn' : 'sec') + '" data-act="save" title="' + (auto ? 'Scrive le modifiche nel file' : 'Scarica o condividi una copia aggiornata del file') + '">' + (auto ? 'Salva ora' : 'Salva') + '</button>'
+    + '<button class="btn sm ' + (ui.dirty && (!auto || ui.saveErr || ui.conflict) ? 'attn' : 'sec') + '" data-act="save" title="' + (auto ? (ui.remote ? 'Scrive le modifiche nel Google Sheet' : 'Scrive le modifiche nel file') :'Scarica o condividi una copia aggiornata del file') + '">' + (auto ? 'Salva ora' : 'Salva') + '</button>'
     + '<button class="btn sm sec" data-act="changeFile" title="Scegli un altro file"><span class="dsk">Cambia file</span><span class="mob">File</span></button>';
   const tabs = $('#tabs');
   tabs.innerHTML = pagesFor().map(([k, l]) => '<button data-go="' + k + '" ' + (ui.page === k ? 'aria-current="page"' : '') + '>' + ICO[k] + '<span>' + l + '</span></button>').join('');
@@ -842,11 +924,13 @@ function closeModal() { const d = $('#scrim'); if (d) d.remove(); ui.edit = null
 /* ------------------------------------------------------------------ landing */
 function landing() {
   const L = ui.landing || {};
-  let b = '';
+  const gs = gsCfg().url;
+  let b = gs ? '<button class="btn" data-act="gsOpen">Apri Google Sheet</button>' : '<button class="btn" data-act="gsSetup">Collega Google Sheet…</button>';
+  if (gs) b += '<button class="btn sec" data-act="gsSetup">Cambia collegamento Google Sheet</button>';
   if (L.handle && window.showOpenFilePicker) b += '<button class="btn" data-act="reopenHandle">Riapri «' + h(L.handle.name) + '»</button>';
   if (L.last) b += '<button class="btn ' + (b ? 'sec' : '') + '" data-act="resumeLocal">Continua con la copia locale<span class="small">(' + h(L.last.name) + ', ' + new Date(L.last.ts).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ')</span></button>';
   b += '<button class="btn ' + (b ? 'sec' : '') + '" data-act="openFile">Scegli un file Excel…</button>';
-  return '<div class="land"><h1>Conti di casa</h1><p>Scegli il file <b>.xlsx</b> su cui lavorare. Le spese restano nel tuo file: l\'app non le invia da nessuna parte.</p>'
+  return '<div class="land"><h1>Conti di casa</h1><p>Apri il <b>Google Sheet</b> condiviso, oppure scegli un file <b>.xlsx</b>. Le spese vanno solo nel foglio o nel file che scegli: l\'app non le invia da nessun\'altra parte.</p>'
     + '<div class="acts" style="flex-direction:column;align-items:stretch">' + b + '</div>'
     + '<p class="muted small" style="margin-top:22px">Il file è unico per tutti e due. Al primo accesso su ogni dispositivo scegli se sei Simone o Laura: il profilo Laura non mostra la pagina Impostazioni.</p></div>';
 }
@@ -1192,7 +1276,12 @@ document.addEventListener('click', e => {
   const i = +t.dataset.i;
   switch (t.dataset.act) {
     case 'save': save(false); break;
-    case 'changeFile': if (!ui.dirty || (ui.handle && ui.canWrite) || confirm('Ci sono modifiche non salvate nel file. Cambiare file comunque? (restano nella copia locale)')) { S = null; renderAll(); init(); } break;
+    case 'changeFile': if (!ui.dirty || (autoMode() && !ui.saveErr && !ui.conflict) || confirm('Ci sono modifiche non salvate nel file. Cambiare file comunque? (restano nella copia locale)')) { S = null; renderAll(); init(true); } break;
+    case 'gsOpen': remoteLoad(); break;
+    case 'gsSetup': gsSetup(); break;
+    case 'gsSave': gsSave(); break;
+    case 'gsReload': closeModal(); ui.dirty = false; ui.conflict = false; remoteLoad(); break;
+    case 'gsForce': closeModal(); ui.conflict = false; remoteSave(false, true); break;
     case 'openFile': openPicker(); break;
     case 'reopenHandle': reopenHandle(); break;
     case 'resumeLocal': resumeLocal(); break;
@@ -1240,7 +1329,8 @@ document.addEventListener('keydown', e => {
     if (root.dataset.form === 'ins') submitIns(); else submitEdit();
   }
 });
-window.addEventListener('beforeunload', e => { if (S && ui.dirty && !(ui.handle && ui.canWrite)) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if (S && ui.dirty && !(autoMode() && !ui.saveErr && !ui.conflict && !saving)) { e.preventDefault(); e.returnValue = ''; } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') remoteRefresh(); });
 
 /* --------------------------------------------------------------------- avvio */
 function injectPWA() {
@@ -1251,10 +1341,11 @@ function injectPWA() {
   } catch (e) { /* ignore */ }
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-async function init() {
+async function init(skipAuto) {
   let last = null, handle = null;
   try { last = await kvGet('last'); handle = await kvGet('handle'); } catch (e) { /* ignore */ }
   ui.landing = { last, handle }; if (!S) renderAll();
+  if (!S && !skipAuto && gsCfg().url) await remoteLoad();
 }
 injectPWA(); init();
 window.__app = { ui, get S() { return S; }, C, loadBuffer };
