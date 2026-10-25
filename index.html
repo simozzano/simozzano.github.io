@@ -809,11 +809,18 @@ function gsParse(j) {
   return C.parseWorkbook(wb);
 }
 async function remoteLoad() {
+  const c = gsCfg();
+  if (!c.url || !c.token) { S = null; renderAll(); gsSetup(); return false; }
   try {
     const j = await gsRequest();
     adoptState(gsParse(j), { remote: true, rev: j.rev, fileName: 'Google Sheet', handle: null, canWrite: false, dirty: false });
     return true;
-  } catch (e) { S = null; toast(e.message || 'Impossibile aprire il Google Sheet'); renderAll(); return false; }
+  } catch (e) {
+    S = null; renderAll();
+    if (/token/i.test(e.message || '')) { lsSet('gsToken', ''); gsSetup(); toast('Token non valido: riprova'); }
+    else toast(e.message || 'Impossibile aprire il Google Sheet');
+    return false;
+  }
 }
 let saving = false;
 async function remoteSave(auto, force) {
