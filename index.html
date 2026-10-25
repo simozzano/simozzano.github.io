@@ -794,7 +794,8 @@ async function loadBuffer(buf, name, handle, can, dirty) {
 }
 
 /* ------------------------------------------------------------ Google Sheet (Apps Script) */
-const gsCfg = () => ({ url: lsGet('gsUrl') || '', token: lsGet('gsToken') || '' });
+const GS_URL = ''; // incolla qui l'URL della web app (quello che finisce con /exec): da solo non dà accesso, serve il token
+const gsCfg = () => ({ url: GS_URL || lsGet('gsUrl') || '', token: lsGet('gsToken') || '' });
 async function gsRequest(init) {
   const { url, token } = gsCfg();
   const r = init ? await fetch(url, init(token)) : await fetch(url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token));
@@ -843,15 +844,16 @@ function conflictModal() {
 function gsSetup() {
   const c = gsCfg();
   openModal('<div class="sec-h" style="margin-top:0"><h2>Collega Google Sheet</h2></div>'
-    + '<div><label class="l" for="gsUrlIn">URL della web app (Apps Script)</label><input class="in" id="gsUrlIn" type="text" autocomplete="off" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec" value="' + h(c.url) + '"></div>'
-    + '<div style="margin-top:10px"><label class="l" for="gsTokenIn">Token</label><input class="in" id="gsTokenIn" type="text" autocomplete="off" autocapitalize="off" value="' + h(c.token) + '"></div>'
-    + '<p class="muted small">URL e token restano solo su questo dispositivo.</p>'
+    + (GS_URL ? '' : '<div><label class="l" for="gsUrlIn">URL della web app (Apps Script)</label><input class="in" id="gsUrlIn" type="text" autocomplete="off" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec" value="' + h(c.url) + '"></div>')
+    + '<div style="margin-top:10px"><label class="l" for="gsTokenIn">Token</label><input class="in" id="gsTokenIn" type="password" autocomplete="off" autocapitalize="off" value="' + h(c.token) + '"></div>'
+    + '<p class="muted small">Il token resta solo su questo dispositivo.</p>'
     + '<div class="acts"><button class="btn grow" data-act="gsSave">Collega e apri</button><button class="btn sec grow" data-act="closeModal">Annulla</button></div>');
 }
 async function gsSave() {
-  const u = ($('#gsUrlIn').value || '').trim(), t = ($('#gsTokenIn').value || '').trim();
-  if (!/^https:\/\//.test(u) || !t) { toast('Inserisci URL (https://…) e token'); return; }
-  lsSet('gsUrl', u); lsSet('gsToken', t); closeModal(); await remoteLoad();
+  const u = GS_URL || ($('#gsUrlIn').value || '').trim(), t = ($('#gsTokenIn').value || '').trim();
+  if (!/^https:\/\//.test(u) || !t) { toast(GS_URL ? 'Inserisci il token' : 'Inserisci URL (https://…) e token'); return; }
+  if (!GS_URL) lsSet('gsUrl', u);
+  lsSet('gsToken', t); closeModal(); await remoteLoad();
 }
 async function openPicker() {
   if (window.showOpenFilePicker) {
