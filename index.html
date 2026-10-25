@@ -796,12 +796,28 @@ async function loadBuffer(buf, name, handle, can, dirty) {
 /* ------------------------------------------------------------ Google Sheet (Apps Script) */
 const GS_URL = 'https://script.google.com/macros/s/AKfycbxtzhYchTrBQbqbtmZ9jj2k-Yz7qjAp78UZMFhfZuDuxHEB8yPwjKBnSkEYUwh4Ez1x/exec'; // incolla qui l'URL della web app (quello che finisce con /exec): da solo non dà accesso, serve il token
 const gsCfg = () => ({ url: GS_URL || lsGet('gsUrl') || '', token: lsGet('gsToken') || '' });
-async function gsRequest(init) {
+async function gsRequest() {
   const { url, token } = gsCfg();
-  const r = init ? await fetch(url, init(token)) : await fetch(url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token));
+  const r = await fetch(url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token));
   let j; try { j = await r.json(); } catch (e) { throw new Error('Risposta non valida: controlla l\'URL del Google Sheet'); }
   if (j.error) throw new Error(j.error);
   return j;
+}
+/* POST tramite form in un iframe nascosto (niente CORS: Safari non gestisce bene fetch POST verso Apps Script);
+   la risposta torna con postMessage dalla pagina restituita da doPost. */
+function gsPost(payload) {
+  return new Promise((resolve, reject) => {
+    const { url } = gsCfg(), id = 'gs' + Date.now() + Math.random().toString(36).slice(2);
+    const fr = document.createElement('iframe'); fr.name = id; fr.style.display = 'none';
+    const f = document.createElement('form'); f.method = 'POST'; f.action = url; f.target = id; f.style.display = 'none';
+    const inp = document.createElement('input'); inp.type = 'hidden'; inp.name = 'payload'; inp.value = JSON.stringify(Object.assign({ id }, payload)); f.appendChild(inp);
+    let done = false;
+    const end = (fn, v) => { if (done) return; done = true; clearTimeout(tm); window.removeEventListener('message', on); fr.remove(); f.remove(); fn(v); };
+    const on = ev => { const d = ev.data; if (d && d.gsId === id) { if (d.error) end(reject, new Error(d.error)); else end(resolve, d); } };
+    const tm = setTimeout(() => end(reject, new Error('nessuna risposta dal Google Sheet (script non aggiornato?)')), 40000);
+    window.addEventListener('message', on);
+    document.body.appendChild(fr); document.body.appendChild(f); f.submit();
+  });
 }
 function gsParse(j) {
   const wb = {};
@@ -828,7 +844,7 @@ async function remoteSave(auto, force) {
   saving = true; ui.saveErr = false; renderTop();
   const v = ui.ver;
   try {
-    const j = await gsRequest(token => ({ method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ token, baseRev: force ? null : ui.rev, sheets: C.remoteSheets(S) }) }));
+    const j = await gsPost({ token: gsCfg().token, baseRev: force ? null : ui.rev, sheets: C.remoteSheets(S) });
     if (j.conflict) { ui.conflict = true; conflictModal(); }
     else { ui.rev = j.rev; ui.dirty = ui.ver !== v; if (!auto) toast('Salvato su Google Sheet'); }
   } catch (e) { ui.saveErr = true; toast('Salvataggio non riuscito: ' + (e.message || 'rete assente')); }

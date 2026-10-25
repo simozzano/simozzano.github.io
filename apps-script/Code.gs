@@ -49,15 +49,25 @@ function doGet(e) {
   return out_({ rev: revOf_(sheets), sheets: sheets });
 }
 
+// Risposta alla POST: pagina HTML che rimanda il risultato alla pagina dell'app con postMessage
+// (l'app invia un form in un iframe nascosto, così non dipende da CORS).
+function reply_(obj, id) {
+  obj.gsId = id;
+  const json = JSON.stringify(obj).replace(/</g, '\\u003c');
+  return HtmlService.createHtmlOutput('<script>window.top.postMessage(' + json + ',"*");</script>')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
 function doPost(e) {
   let body;
-  try { body = JSON.parse(e.postData.contents); } catch (err) { return out_({ error: 'Richiesta non valida' }); }
-  if (body.token !== TOKEN) return out_({ error: 'Token non valido' });
+  try { body = JSON.parse(e.parameter.payload || e.postData.contents); } catch (err) { return reply_({ error: 'Richiesta non valida' }, null); }
+  const id = body.id;
+  if (body.token !== TOKEN) return reply_({ error: 'Token non valido' }, id);
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return out_({ error: 'Foglio occupato, riprova' });
+  if (!lock.tryLock(20000)) return reply_({ error: 'Foglio occupato, riprova' }, id);
   try {
     const cur = revOf_(readAll_());
-    if (body.baseRev && body.baseRev !== cur) return out_({ conflict: true, rev: cur });
+    if (body.baseRev && body.baseRev !== cur) return reply_({ conflict: true, rev: cur }, id);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const tz = ss.getSpreadsheetTimeZone();
     SHEETS.forEach(function (name) {
@@ -83,7 +93,7 @@ function doPost(e) {
       }
     });
     SpreadsheetApp.flush();
-    return out_({ rev: revOf_(readAll_()) });
+    return reply_({ rev: revOf_(readAll_()) }, id);
   } finally {
     lock.releaseLock();
   }
