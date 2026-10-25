@@ -74,8 +74,10 @@ function doPost(e) {
       const data = body.sheets && body.sheets[name];
       const sh = ss.getSheetByName(name);
       if (!data || !sh) return;
-      const width = data.rows.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
-      const values = data.rows.map(function (r) {
+      const rows = Array.isArray(data) ? data : data.rows;
+      if (!rows) return;
+      const width = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
+      const values = rows.map(function (r) {
         const row = [];
         for (let i = 0; i < width; i++) {
           const v = i < r.length ? r[i] : null;

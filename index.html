@@ -757,7 +757,7 @@ async function persistLocal() {
   try { const bytes = await refreshBytes(); await kvSet('last', { name: ui.fileName, bytes, dirty: ui.dirty, ts: Date.now() }); } catch (e) { console.warn(e); }
 }
 function scheduleAutosave() { clearTimeout(autoT); autoT = setTimeout(() => save(true), 900); }
-const autoMode = () => ui.remote || !!(ui.handle && ui.canWrite);
+const autoMode = () => !ui.remote && !!(ui.handle && ui.canWrite); // salvataggio automatico solo su file locale; Google Sheet solo con "Salva ora"
 function commit(msg) {
   ui.dirty = true; ui.stale = true; ui.ver++; ui.saveErr = false; renderTop(); renderMain(); schedulePersist();
   if (autoMode() && !ui.conflict) scheduleAutosave();
@@ -879,7 +879,6 @@ async function remoteSave(auto, force) {
   });
   saving = false; renderTop(); persistLocal();
   if (conflict) conflictModal();
-  if (ui.dirty && !ui.saveErr && !ui.conflict) scheduleAutosave();
 }
 async function remoteRefresh() {
   if (!S || !ui.remote || ui.dirty || saving || ui.edit || $('#scrim')) return;
@@ -952,10 +951,10 @@ function renderAll() {
 function renderTop() {
   const top = $('#top'); if (!top || !S) return;
   const auto = autoMode();
-  const st = ui.dirty ? (auto && !ui.saveErr && !ui.conflict ? 'Salvataggio in corso…' : 'Modifiche non salvate') : (auto ? (ui.remote ? 'Salvato su Google Sheet' : 'Salvato nel file') : 'Aggiornato');
+  const st = ui.dirty ? (auto && !ui.saveErr && !ui.conflict ? 'Salvataggio in corso…' : 'Modifiche non salvate') : (ui.remote ? 'Salvato su Google Sheet' : auto ? 'Salvato nel file' : 'Aggiornato');
   top.innerHTML = '<div class="brand">Conti di casa</div>'
     + '<div class="file"><span class="dot ' + (ui.dirty ? 'dirty' : '') + '" aria-hidden="true"></span><span class="small">' + st + '</span><b title="' + h(ui.fileName) + '">' + h(ui.fileName) + '</b><button class="badge" data-act="askProfile" title="Cambia profilo su questo dispositivo" style="cursor:pointer;color:inherit">' + (isLaura() ? 'Laura' : 'Simone') + '</button></div>'
-    + '<button class="btn sm ' + (ui.dirty && (!auto || ui.saveErr || ui.conflict) ? 'attn' : 'sec') + '" data-act="save" title="' + (auto ? (ui.remote ? 'Scrive le modifiche nel Google Sheet' : 'Scrive le modifiche nel file') :'Scarica o condividi una copia aggiornata del file') + '">' + (auto ? 'Salva ora' : 'Salva') + '</button>'
+    + '<button class="btn sm ' + (ui.dirty && (!auto || ui.saveErr || ui.conflict) ? 'attn' : 'sec') + '" data-act="save" title="' + (ui.remote ? 'Scrive le modifiche nel Google Sheet' : auto ? 'Scrive le modifiche nel file' : 'Scarica o condividi una copia aggiornata del file') + '">' + (ui.remote || auto ? 'Salva ora' : 'Salva') + '</button>'
     + '<button class="btn sm sec" data-act="changeFile" title="Scegli un altro file"><span class="dsk">Cambia file</span><span class="mob">File</span></button>';
   const tabs = $('#tabs');
   tabs.innerHTML = pagesFor().map(([k, l]) => '<button data-go="' + k + '" ' + (ui.page === k ? 'aria-current="page"' : '') + '>' + ICO[k] + '<span>' + l + '</span></button>').join('');
@@ -1332,7 +1331,7 @@ document.addEventListener('click', e => {
   const i = +t.dataset.i;
   switch (t.dataset.act) {
     case 'save': save(false); break;
-    case 'changeFile': if (!ui.dirty || (autoMode() && !ui.saveErr && !ui.conflict) || confirm('Ci sono modifiche non salvate nel file. Cambiare file comunque? (restano nella copia locale)')) { S = null; renderAll(); init(true); } break;
+    case 'changeFile': if (!ui.dirty || (autoMode() && !ui.saveErr && !ui.conflict) || confirm('Ci sono modifiche non salvate' + (ui.remote ? ' sul Google Sheet' : ' nel file') + '. Cambiare comunque? (restano nella copia locale)')) { S = null; renderAll(); init(true); } break;
     case 'gsOpen': remoteLoad(); break;
     case 'gsSetup': gsSetup(); break;
     case 'gsSave': gsSave(); break;
