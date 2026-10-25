@@ -794,7 +794,7 @@ async function loadBuffer(buf, name, handle, can, dirty) {
 }
 
 /* ------------------------------------------------------------ Google Sheet (Apps Script) */
-const GS_URL = ''; // incolla qui l'URL della web app (quello che finisce con /exec): da solo non dà accesso, serve il token
+const GS_URL = 'https://script.google.com/macros/s/AKfycbxtzhYchTrBQbqbtmZ9jj2k-Yz7qjAp78UZMFhfZuDuxHEB8yPwjKBnSkEYUwh4Ez1x/exec'; // incolla qui l'URL della web app (quello che finisce con /exec): da solo non dà accesso, serve il token
 const gsCfg = () => ({ url: GS_URL || lsGet('gsUrl') || '', token: lsGet('gsToken') || '' });
 async function gsRequest(init) {
   const { url, token } = gsCfg();
