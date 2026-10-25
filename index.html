@@ -207,6 +207,12 @@ input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-we
 .acts .grow{flex:1}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--tabh) + env(safe-area-inset-bottom) + 16px);background:rgba(28,28,46,.94);color:#fff;padding:11px 18px;border-radius:99px;z-index:60;font-size:.9rem;font-weight:500;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
 #toast.show{opacity:1}
+#busy{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;background:rgba(10,10,30,.38);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);cursor:progress}
+#busy.on{display:flex}
+.busy-box{display:flex;align-items:center;gap:14px;background:var(--card);color:var(--ink);padding:16px 22px;border-radius:18px;font-weight:600;box-shadow:0 10px 40px rgba(0,0,0,.25);max-width:88vw}
+.spin{width:22px;height:22px;flex:none;border-radius:50%;border:3px solid var(--accent-soft);border-top-color:var(--accent);animation:gsspin .8s linear infinite}
+@keyframes gsspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2s!important}}
 
 .land{max-width:560px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 64px) 24px 40px}
 .land h1{font-size:2.6rem;line-height:1.05;margin-bottom:10px}
@@ -785,12 +791,27 @@ function adoptState(st, over) {
   persistLocal(); renderAll(); window.scrollTo(0, 0);
   if (!lsGet('profilo')) askProfile();
 }
+/* loader a schermo intero: blocca i clic finché un'operazione di caricamento/salvataggio è in corso */
+let busyN = 0;
+function busyOn(msg) {
+  busyN++;
+  let b = $('#busy');
+  if (!b) { b = document.createElement('div'); b.id = 'busy'; b.setAttribute('role', 'alert'); b.setAttribute('aria-live', 'assertive'); b.innerHTML = '<div class="busy-box"><div class="spin" aria-hidden="true"></div><span></span></div>'; document.body.appendChild(b); }
+  $('span', b).textContent = msg || 'Attendi…';
+  b.classList.add('on');
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+}
+function busyOff() { busyN = Math.max(0, busyN - 1); if (!busyN) { const b = $('#busy'); if (b) b.classList.remove('on'); } }
+async function withBusy(msg, fn) { busyOn(msg); try { return await fn(); } finally { busyOff(); } }
+
 async function loadBuffer(buf, name, handle, can, dirty) {
-  let st;
-  try { st = C.parseWorkbook(await C.readXlsx(buf)); } catch (e) { S = null; toast(e.message || 'File non leggibile'); renderAll(); return false; }
-  adoptState(st, { fileName: name, handle: handle || null, canWrite: !!can, dirty: !!dirty });
-  if (handle) kvSet('handle', handle).catch(() => {});
-  return true;
+  return withBusy('Apertura del file…', async () => {
+    let st;
+    try { st = C.parseWorkbook(await C.readXlsx(buf)); } catch (e) { S = null; toast(e.message || 'File non leggibile'); renderAll(); return false; }
+    adoptState(st, { fileName: name, handle: handle || null, canWrite: !!can, dirty: !!dirty });
+    if (handle) kvSet('handle', handle).catch(() => {});
+    return true;
+  });
 }
 
 /* ------------------------------------------------------------ Google Sheet (Apps Script) */
@@ -827,28 +848,37 @@ function gsParse(j) {
 async function remoteLoad() {
   const c = gsCfg();
   if (!c.url || !c.token) { S = null; renderAll(); gsSetup(); return false; }
+  if (loadingRemote) return false;
+  loadingRemote = true;
+  let err = null;
   try {
-    const j = await gsRequest();
-    adoptState(gsParse(j), { remote: true, rev: j.rev, fileName: 'Google Sheet', handle: null, canWrite: false, dirty: false });
-    return true;
-  } catch (e) {
-    S = null; renderAll();
-    if (/token/i.test(e.message || '')) { lsSet('gsToken', ''); gsSetup(); toast('Token non valido: riprova'); }
-    else toast(e.message || 'Impossibile aprire il Google Sheet');
-    return false;
-  }
+    await withBusy('Collegamento al Google Sheet…', async () => {
+      try {
+        const j = await gsRequest();
+        adoptState(gsParse(j), { remote: true, rev: j.rev, fileName: 'Google Sheet', handle: null, canWrite: false, dirty: false });
+      } catch (e) { err = e; S = null; renderAll(); }
+    });
+  } finally { loadingRemote = false; }
+  if (!err) return true;
+  if (/token/i.test(err.message || '')) { lsSet('gsToken', ''); gsSetup(); toast('Token non valido: riprova'); }
+  else toast(err.message || 'Impossibile aprire il Google Sheet');
+  return false;
 }
-let saving = false;
+let saving = false, loadingRemote = false;
 async function remoteSave(auto, force) {
   if (saving) return;
   saving = true; ui.saveErr = false; renderTop();
   const v = ui.ver;
-  try {
-    const j = await gsPost({ token: gsCfg().token, baseRev: force ? null : ui.rev, sheets: C.remoteSheets(S) });
-    if (j.conflict) { ui.conflict = true; conflictModal(); }
-    else { ui.rev = j.rev; ui.dirty = ui.ver !== v; if (!auto) toast('Salvato su Google Sheet'); }
-  } catch (e) { ui.saveErr = true; toast('Salvataggio non riuscito: ' + (e.message || 'rete assente')); }
+  let conflict = false;
+  await withBusy('Salvataggio sul Google Sheet…', async () => {
+    try {
+      const j = await gsPost({ token: gsCfg().token, baseRev: force ? null : ui.rev, sheets: C.remoteSheets(S) });
+      if (j.conflict) { ui.conflict = true; conflict = true; }
+      else { ui.rev = j.rev; ui.dirty = ui.ver !== v; if (!auto) toast('Salvato su Google Sheet'); }
+    } catch (e) { ui.saveErr = true; toast('Salvataggio non riuscito: ' + (e.message || 'rete assente')); }
+  });
   saving = false; renderTop(); persistLocal();
+  if (conflict) conflictModal();
   if (ui.dirty && !ui.saveErr && !ui.conflict) scheduleAutosave();
 }
 async function remoteRefresh() {
@@ -1295,6 +1325,7 @@ function archiveDo() {
 
 /* ------------------------------------------------------------------ eventi */
 document.addEventListener('click', e => {
+  if (busyN) return;
   const t = e.target.closest('[data-go],[data-act],[data-edit]'); if (!t) { if (e.target.id === 'scrim') closeModal(); return; }
   if (t.dataset.go) { ui.page = t.dataset.go; renderTop(); renderMain(); return; }
   if (t.dataset.edit) { openEdit(t.dataset.edit); return; }
@@ -1348,6 +1379,7 @@ document.addEventListener('change', e => {
   if (e.target.id === 'fileInput') { const f = e.target.files[0]; e.target.value = ''; if (f) f.arrayBuffer().then(b => loadBuffer(b, f.name, null, false)); }
 });
 document.addEventListener('keydown', e => {
+  if (busyN) { e.preventDefault(); return; }
   if (e.key === 'Escape') closeModal();
   if (e.key === 'Enter' && e.target.matches('[data-f]') && e.target.type !== 'checkbox' && e.target.tagName !== 'SELECT') {
     const root = e.target.closest('[data-form]'); if (!root) return; e.preventDefault();

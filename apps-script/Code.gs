@@ -11,7 +11,7 @@
  * Dopo ogni modifica a questo file: Distribuisci → Gestisci distribuzioni →
  * modifica → Nuova versione.
  */
-const TOKEN = 'Zanucci.94';
+const TOKEN = 'CAMBIA-QUESTO-TOKEN';
 const SHEETS = ['Spese', 'Storico', 'Categorie', 'Impostazioni', 'Persone', 'PesiAnnuali'];
 const DATE_COLS = { Spese: [1], Storico: [2], Persone: [4] }; // colonne (1-based) con date
 const DATE_FMT = 'dd/mm/yyyy';
@@ -94,6 +94,8 @@ function doPost(e) {
     });
     SpreadsheetApp.flush();
     return reply_({ rev: revOf_(readAll_()) }, id);
+  } catch (err) {
+    return reply_({ error: 'Errore nello script: ' + (err && err.message ? err.message : err) + (err && err.stack ? ' | ' + String(err.stack).split('\n')[0] : '') }, id);
   } finally {
     lock.releaseLock();
   }
