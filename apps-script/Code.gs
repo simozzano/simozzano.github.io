@@ -74,8 +74,10 @@ function doPost(e) {
       const data = body.sheets && body.sheets[name];
       const sh = ss.getSheetByName(name);
       if (!data || !sh) return;
-      const width = data.rows.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
-      const values = data.rows.map(function (r) {
+      const rows = Array.isArray(data) ? data : data.rows;
+      if (!rows || !rows.length) return; // mai svuotare un foglio
+      const width = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
+      const values = rows.map(function (r) {
         const row = [];
         for (let i = 0; i < width; i++) {
           const v = i < r.length ? r[i] : null;
@@ -85,12 +87,22 @@ function doPost(e) {
         }
         return row;
       });
-      sh.getDataRange().clearContent();
-      if (values.length) {
-        const range = sh.getRange(1, 1, values.length, width);
-        (DATE_COLS[name] || []).forEach(function (c) { if (c <= width) sh.getRange(1, c, values.length, 1).setNumberFormat(DATE_FMT); });
-        range.setValues(values);
-      }
+      // 1) prima si scrive, e solo dopo si cancella l'eventuale coda: se la scrittura fallisce i dati vecchi restano
+      if (sh.getMaxRows() < values.length) sh.insertRowsAfter(sh.getMaxRows(), values.length - sh.getMaxRows());
+      if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+      const range = sh.getRange(1, 1, values.length, width);
+      // 2) le convalide (menu a tendina) rifiuterebbero la scrittura: si tolgono un attimo e si rimettono,
+      //    estendendo alle righe nuove la regola della riga 2
+      const rules = range.getDataValidations();
+      const rulesNew = rules.map(function (r, ri) { return r.map(function (v, ci) { return v || (ri >= 1 ? rules[1][ci] : null) || null; }); });
+      range.clearDataValidations();
+      (DATE_COLS[name] || []).forEach(function (c) { if (c <= width) sh.getRange(1, c, values.length, 1).setNumberFormat(DATE_FMT); });
+      range.setValues(values);
+      try { range.setDataValidations(rulesNew); } catch (err) { /* convalide non ripristinabili: i dati sono comunque salvati */ }
+      // 3) coda: righe e colonne oltre i nuovi dati
+      const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+      if (lastRow > values.length) sh.getRange(values.length + 1, 1, lastRow - values.length, lastCol).clearContent();
+      if (lastCol > width) sh.getRange(1, width + 1, Math.min(lastRow, values.length), lastCol - width).clearContent();
     });
     SpreadsheetApp.flush();
     return reply_({ rev: revOf_(readAll_()) }, id);
