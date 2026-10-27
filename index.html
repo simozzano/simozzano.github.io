@@ -93,6 +93,12 @@ main{padding:2px 16px 0}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{border:1.5px solid var(--line);background:none;border-radius:99px;min-height:34px;padding:0 13px 0 10px;display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:.88rem;color:var(--ink2);text-decoration:line-through}
 .chip i{width:11px;height:11px;border-radius:50%;background:var(--c);opacity:.45}
+.slides{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:16px;scrollbar-width:thin}
+.slide{flex:0 0 100%;scroll-snap-align:start;min-width:0}
+.slide-l{font-weight:600;font-size:.9rem;margin-bottom:6px}
+.dots{display:flex;justify-content:center;gap:8px;margin-top:10px}
+.dot{width:9px;height:9px;padding:0;border-radius:50%;border:0;background:var(--line);cursor:pointer}
+.dot.on{background:var(--accent)}
 .chip small{font-size:.7rem;opacity:.8}
 .chip.on{border-color:transparent;background:color-mix(in srgb,var(--c) 18%,var(--card));color:var(--ink);font-weight:500;text-decoration:none}
 .chip.on i{opacity:1}
@@ -117,6 +123,7 @@ table.mx td.t,table.mx th.t{border-left:1px solid var(--line);font-weight:700}
 .leg{display:grid;gap:2px}
 .leg div{display:grid;grid-template-columns:14px 1fr auto 84px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:.92rem}
 .leg div:last-child{border:0}
+.leg.w div{grid-template-columns:14px 1fr auto 84px 84px}
 .leg i{width:12px;height:12px;border-radius:4px;background:var(--c)}
 .leg .p{color:var(--ink2);font-size:.82rem;font-weight:600}
 .leg .a{text-align:right;font-weight:600}
@@ -1029,11 +1036,22 @@ function pageRiassunto() {
       + '<tr class="avg"><td>Media</td>' + R.media.vals.map(cell).join('') + '<td class="t num">' + num(R.media.tot) + '</td></tr>'
       + '</tbody></table></div>';
 
-    const items = R.cols.map((c, i) => ({ c, v: R.media.vals[i], col: catColor(c) })).filter(x => x.v > 0.005).sort((a, b) => b.v - a.v);
-    const totM = items.reduce((s, x) => s + x.v, 0);
-    o += '<div class="sec-h"><h2>Media mensile per categoria</h2><span class="small muted">su ' + R.media.n + ' mesi completi</span></div><div class="card"><div class="dn">' + donut(items, totM)
-      + '<div class="leg">' + items.map(x => '<div style="--c:' + x.col + '"><i></i><span>' + h(x.c) + '</span><span class="p num">' + Math.round(x.v / totM * 100) + '%</span><span class="a num">' + eur(x.v) + '</span></div>').join('') + '</div></div></div>';
-    o += '<div class="sec-h"><h2>Andamento mensile</h2><span class="small muted">linea tratteggiata = media mensile</span></div><div class="card">' + stackChart(R, curM) + '</div>';
+    const donutBlock = (RR, withTot) => {
+      const items = RR.cols.map((c, i) => ({ c, v: RR.media.vals[i], t: RR.tot.vals[i], col: catColor(c) })).filter(x => x.v > 0.005).sort((a, b) => b.v - a.v);
+      const totM = items.reduce((s, x) => s + x.v, 0);
+      if (!items.length) return '<div class="empty small muted" style="padding:24px 0;text-align:center">Nessuna spesa da mostrare</div>';
+      return '<div class="dn">' + donut(items, totM) + '<div class="leg' + (withTot ? ' w' : '') + '">' + (withTot ? '<div class="small muted"><i style="background:none"></i><span></span><span></span><span class="a">al mese</span><span class="a">totale</span></div>' : '') + items.map(x => '<div style="--c:' + x.col + '"><i></i><span>' + h(x.c) + '</span><span class="p num">' + Math.round(x.v / totM * 100) + '%</span><span class="a num">' + eur(x.v) + '</span>' + (withTot ? '<span class="a num">' + eur(x.t) + '</span>' : '') + '</div>').join('') + '</div></div>';
+    };
+    const sl = (lab, inner) => '<div class="slide"><div class="slide-l">' + lab + '</div>' + inner + '</div>';
+    const dots = labs => labs.length < 2 ? '' : '<div class="dots">' + labs.map((l, i) => '<button class="dot ' + (i ? '' : 'on') + '" data-act="slide" data-n="' + i + '" aria-label="' + h(l) + '"></button>').join('') + '</div>';
+    const persone = S.persone.filter(p => p.riparto);
+    const catSl = [['Media famiglia', donutBlock(R)]].concat(persone.map(p => [p.nome, donutBlock(C.riassunto(Object.assign({}, S, { spese: S.spese.filter(e => { const c = C.findCat(S, e.categoria); return c && norm(c.personaleDi) === norm(p.nome); }) }), {}), true)]));
+    o += '<div class="sec-h"><h2>Andamento per categoria</h2><span class="small muted">media mensile su ' + R.media.n + ' mesi completi' + (persone.length ? ' · persone: solo le loro spese personali' : '') + '</span></div><div class="card">'
+      + '<div class="slides">' + catSl.map(x => sl(h(x[0]), x[1])).join('') + '</div>' + dots(catSl.map(x => x[0])) + '</div>';
+    const hasViaggi = R.cols.some(isViaggi);
+    const mSl = [['Con viaggi', R], ['Senza viaggi', senzaViaggi(R)]];
+    o += '<div class="sec-h"><h2>Andamento per mese</h2><span class="small muted">linea tratteggiata = media mensile</span></div><div class="card">'
+      + (hasViaggi ? '<div class="slides">' + mSl.map(x => sl(x[0], stackChart(x[1], curM))).join('') + '</div>' + dots(mSl.map(x => x[0])) : stackChart(R, curM)) + '</div>';
   }
   o += equilibrio();
   const yrs = {}; S.storico.forEach(e => { if (e.anno) yrs[e.anno] = (yrs[e.anno] || 0) + e.spesa; });
@@ -1050,6 +1068,13 @@ function donut(items, total) {
     off += len;
   });
   return s + '</g><text x="80" y="78" text-anchor="middle" class="dn-v">' + Math.round(total).toLocaleString('it-IT') + ' €</text><text x="80" y="96" text-anchor="middle" class="dn-k">al mese</text></svg>';
+}
+const isViaggi = c => norm(c) === 'viaggi';
+function senzaViaggi(R) {
+  const keep = R.cols.map(c => !isViaggi(c)), pick = vals => vals.filter((_, i) => keep[i]), sum = a => a.reduce((x, y) => x + y, 0);
+  const rows = R.rows.map(r => { const vals = pick(r.vals); return Object.assign({}, r, { vals, tot: sum(vals) }); });
+  const mv = pick(R.media.vals);
+  return Object.assign({}, R, { cols: R.cols.filter((_, i) => keep[i]), rows, media: Object.assign({}, R.media, { vals: mv, tot: sum(mv) }) });
 }
 function stackChart(R, curM) {
   const W = 600, H = 210, pl = 4, pb = 30, pt = 22;
@@ -1351,6 +1376,7 @@ document.addEventListener('click', e => {
     case 'closeModal': closeModal(); break;
     case 'resetFil': ui.fil = { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' }; ui.limit = 200; renderMain(); break;
     case 'more': ui.limit += 200; renderList(); break;
+    case 'slide': { const sl = t.closest('.card').querySelector('.slides'); sl.scrollTo({ left: sl.clientWidth * +t.dataset.n, behavior: 'smooth' }); break; }
     case 'toggleCat': { const m = catOnMap(), c = S.categorie.find(x => x.nome === t.dataset.c); m[c.nome] = !isIncluded(c); lsSet('catOn', JSON.stringify(m)); renderMain(); break; }
     case 'editPesi': ui.editPesi = +t.dataset.a; renderMain(); break;
     case 'cancelPesi': ui.editPesi = null; renderMain(); break;
@@ -1377,6 +1403,11 @@ function onFormInput(e) {
   }
 }
 document.addEventListener('input', onFormInput);
+document.addEventListener('scroll', ev => {
+  const sl = ev.target; if (!sl.classList || !sl.classList.contains('slides')) return;
+  const i = Math.round(sl.scrollLeft / sl.clientWidth);
+  sl.closest('.card').querySelectorAll('.dot').forEach((d, k) => d.classList.toggle('on', k === i));
+}, true);
 document.addEventListener('change', e => {
   if (e.target.dataset.set) { setSetting(e.target); return; }
   if (e.target.matches('select[data-f],input[type=radio][data-f],input[type=date][data-f]')) onFormInput(e);
