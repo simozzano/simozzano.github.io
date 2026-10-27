@@ -737,7 +737,7 @@ const inum = v => v == null ? '' : String(v).replace('.', ',');
 const byName = (a, b) => a.localeCompare(b, 'it');
 
 let S = null;
-const ui = { page: 'riassunto', fileName: '', handle: null, canWrite: false, dirty: false, remote: false, rev: null, ver: 0, saveErr: false, conflict: false,fil: { cat: '', mese: '', pagato: '', min: '', max: '' }, limit: 200, form: null, edit: null, landing: {}, bytes: null, stale: true };
+const ui = { page: 'riassunto', fileName: '', handle: null, canWrite: false, dirty: false, remote: false, rev: null, ver: 0, saveErr: false, conflict: false,fil: { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' }, limit: 200, form: null, edit: null, landing: {}, bytes: null, stale: true };
 const isLaura = () => !!S && lsGet('profilo') === 'laura';
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
@@ -787,7 +787,7 @@ async function save(auto) {
 }
 function adoptState(st, over) {
   S = st; S.meta.versione = 'simone';
-  Object.assign(ui, { remote: false, rev: null, saveErr: false, conflict: false, page: 'riassunto', form: newForm(), edit: null, limit: 200, fil: { cat: '', mese: '', pagato: '', min: '', max: '' } }, over);
+  Object.assign(ui, { remote: false, rev: null, saveErr: false, conflict: false, page: 'riassunto', form: newForm(), edit: null, limit: 200, fil: { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' } }, over);
   persistLocal(); renderAll(); window.scrollTo(0, 0);
   if (!lsGet('profilo')) askProfile();
 }
@@ -1134,7 +1134,7 @@ function updateDup(name, onlyButton) {
 function rowHtml(e) {
   const flag = C.daGiustificare({ spese: [e] }).length;
   const dd = e.data ? fmtDate(e.data).slice(0, e.data.slice(0, 4) === String(S.anno) ? 5 : 10) : '—';
-  return '<button class="lr ' + (flag ? 'flag' : '') + '" data-edit="' + e.id + '"><span class="d num">' + dd + '</span><span class="c" style="--c:' + catColor(e.categoria) + '"><i></i>' + h(e.categoria || '(nessuna categoria)') + '<span class="pg">' + h(e.pagato || '') + '</span></span>'
+  return '<button class="lr ' + (flag ? 'flag' : '') + '" ' + (e.anno ? 'style="cursor:default"' : 'data-edit="' + e.id + '"') + '><span class="d num">' + dd + '</span><span class="c" style="--c:' + catColor(e.categoria) + '"><i></i>' + h(e.categoria || '(nessuna categoria)') + '<span class="pg">' + h(e.pagato || '') + '</span></span>'
     + '<span class="s">' + h([e.dettaglio, e.vario].filter(Boolean).join(' · ') || '—') + '</span><span class="p">' + h(e.pagato || '') + '</span><span class="a num">' + eur(e.spesa) + '</span></button>';
 }
 
@@ -1157,10 +1157,12 @@ function submitIns() {
 
 /* ------------------------------------------------------------------ Dettaglio */
 function pageDettaglio() {
-  const cats = S.categorie.map(c => c.nome).sort(byName), f = ui.fil;
+  const cats = S.categorie.map(c => c.nome).sort(byName), f = ui.fil, yr = selYear();
+  const years = [...new Set(S.storico.map(e => e.anno).filter(Boolean).concat(S.anno))].sort((a, b) => b - a);
   const opt = (v, l, sel) => '<option value="' + h(v) + '" ' + (sel ? 'selected' : '') + '>' + h(l) + '</option>';
-  return '<h1 class="ttl">Spese ' + S.anno + '</h1>'
+  return '<h1 class="ttl">Spese ' + yr + '</h1>'
     + '<div class="filters">'
+    + '<div><label for="f_anno">Anno</label><select class="in" id="f_anno" data-fil="anno">' + years.map(y => opt(y, y, y === yr)).join('') + '</select></div>'
     + '<div><label for="f_cat">Categoria</label><select class="in" id="f_cat" data-fil="cat">' + opt('', 'Tutte', !f.cat) + opt('__none', '(senza categoria)', f.cat === '__none') + cats.map(c => opt(c, c, c === f.cat)).join('') + '</select></div>'
     + '<div><label for="f_mese">Mese</label><select class="in" id="f_mese" data-fil="mese">' + opt('', 'Tutti', !f.mese) + MESI_LUNGHI.map((m, i) => opt(i + 1, m, String(i + 1) === String(f.mese))).join('') + '</select></div>'
     + '<div><label for="f_pag">Pagato da</label><select class="in" id="f_pag" data-fil="pagato">' + opt('', 'Tutti', !f.pagato) + S.persone.map(p => opt(p.nome, p.nome, p.nome === f.pagato)).join('') + '</select></div>'
@@ -1169,11 +1171,13 @@ function pageDettaglio() {
     + '<div><button class="btn sec sm" data-act="resetFil" style="width:100%">Azzera filtri</button></div></div>'
     + '<div id="listwrap"></div>';
 }
+function selYear() { const y = +ui.fil.anno; return y && y !== S.anno ? y : S.anno; }
 function filtered() {
-  const f = ui.fil, min = parseNum(f.min), max = parseNum(f.max);
-  return S.spese.map((e, i) => ({ e, i })).filter(({ e }) => {
+  const f = ui.fil, min = parseNum(f.min), max = parseNum(f.max), yr = selYear();
+  const src = yr === S.anno ? S.spese : S.storico.filter(e => e.anno === yr);
+  return src.map((e, i) => ({ e, i })).filter(({ e }) => {
     if (f.cat === '__none') { if (e.categoria) return false; } else if (f.cat && norm(e.categoria) !== norm(f.cat)) return false;
-    if (f.mese && (!e.data || +e.data.slice(5, 7) !== +f.mese || +e.data.slice(0, 4) !== S.anno)) return false;
+    if (f.mese && (!e.data || +e.data.slice(5, 7) !== +f.mese || +e.data.slice(0, 4) !== yr)) return false;
     if (f.pagato && norm(e.pagato) !== norm(f.pagato)) return false;
     if (min != null && e.spesa < min) return false;
     if (max != null && e.spesa > max) return false;
@@ -1183,7 +1187,7 @@ function filtered() {
 function renderList() {
   const w = $('#listwrap'); if (!w) return;
   const list = filtered(), tot = list.reduce((s, e) => s + e.spesa, 0), shown = list.slice(0, ui.limit);
-  w.innerHTML = '<div class="sum"><b>' + list.length + (list.length === 1 ? ' spesa' : ' spese') + '</b><span class="num">Totale <b>' + eur(tot) + '</b></span>' + (list.length ? '<span class="muted small">Tocca una riga per modificarla</span>' : '') + '</div>'
+  w.innerHTML = '<div class="sum"><b>' + list.length + (list.length === 1 ? ' spesa' : ' spese') + '</b><span class="num">Totale <b>' + eur(tot) + '</b></span>' + (list.length ? '<span class="muted small">' + (selYear() === S.anno ? 'Tocca una riga per modificarla' : 'Anno archiviato: sola lettura') + '</span>' : '') + '</div>'
     + (list.length ? '<div class="led">' + shown.map(rowHtml).join('') + '</div>' + (list.length > shown.length ? '<div class="acts" style="justify-content:center;margin-top:12px"><button class="btn sec" data-act="more">Mostra altre ' + Math.min(200, list.length - shown.length) + '</button></div>' : '') : '<div class="led empty">Nessuna spesa con questi filtri.</div>');
 }
 
@@ -1345,7 +1349,7 @@ document.addEventListener('click', e => {
     case 'submitEdit': submitEdit(); break;
     case 'delEdit': delEdit(); break;
     case 'closeModal': closeModal(); break;
-    case 'resetFil': ui.fil = { cat: '', mese: '', pagato: '', min: '', max: '' }; ui.limit = 200; renderMain(); break;
+    case 'resetFil': ui.fil = { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' }; ui.limit = 200; renderMain(); break;
     case 'more': ui.limit += 200; renderList(); break;
     case 'toggleCat': { const m = catOnMap(), c = S.categorie.find(x => x.nome === t.dataset.c); m[c.nome] = !isIncluded(c); lsSet('catOn', JSON.stringify(m)); renderMain(); break; }
     case 'editPesi': ui.editPesi = +t.dataset.a; renderMain(); break;
@@ -1369,7 +1373,7 @@ function onFormInput(e) {
     if (el.dataset.f === 'override') { f.override = el.checked; updateDup(name, true); return; }
     f[el.dataset.f] = el.value; f.override = false; updateDup(name);
   } else if (el.dataset.fil) {
-    ui.fil[el.dataset.fil] = el.value; ui.limit = 200; renderList();
+    ui.fil[el.dataset.fil] = el.value; ui.limit = 200; if (el.dataset.fil === 'anno') renderMain(); else renderList();
   }
 }
 document.addEventListener('input', onFormInput);
