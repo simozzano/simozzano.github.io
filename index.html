@@ -123,6 +123,7 @@ table.mx td.t,table.mx th.t{border-left:1px solid var(--line);font-weight:700}
 .leg{display:grid;gap:2px}
 .leg div{display:grid;grid-template-columns:14px 1fr auto 84px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:.92rem}
 .leg div:last-child{border:0}
+.leg.w2 div{grid-template-columns:14px 1fr 96px}
 .leg.w div{grid-template-columns:14px 1fr auto 84px 84px}
 .leg i{width:12px;height:12px;border-radius:4px;background:var(--c)}
 .leg .p{color:var(--ink2);font-size:.82rem;font-weight:600}
@@ -794,7 +795,7 @@ async function save(auto) {
 }
 function adoptState(st, over) {
   S = st; S.meta.versione = 'simone';
-  Object.assign(ui, { remote: false, rev: null, saveErr: false, conflict: false, page: 'riassunto', form: newForm(), edit: null, limit: 200, fil: { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' } }, over);
+  Object.assign(ui, { remote: false, rev: null, saveErr: false, conflict: false, page: 'riassunto', form: newForm(), edit: null, limit: 200, cmp: null, fil: { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' } }, over);
   persistLocal(); renderAll(); window.scrollTo(0, 0);
   if (!lsGet('profilo')) askProfile();
 }
@@ -943,11 +944,12 @@ function setProfile(p) { lsSet('profilo', p); closeModal(); if (p === 'laura' &&
 /* --------------------------------------------------------------------- UI base */
 const ICO = {
   riassunto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  confronta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 8-9M3 21h18"/></svg>',
   inserisci: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   dettaglio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>',
   impostazioni: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>'
 };
-const PAGES = [['riassunto', 'Riassunto'], ['inserisci', 'Inserisci'], ['dettaglio', 'Dettaglio'], ['impostazioni', 'Impostazioni']];
+const PAGES = [['riassunto', 'Riassunto'], ['confronta', 'Confronta'], ['inserisci', 'Inserisci'], ['dettaglio', 'Dettaglio'], ['impostazioni', 'Impostazioni']];
 const pagesFor = () => PAGES.filter(p => !(p[0] === 'impostazioni' && isLaura()));
 
 function renderAll() {
@@ -972,7 +974,7 @@ function renderMain() {
   const m = $('#main'); if (!m || !S) return;
   if (ui.page === 'impostazioni' && isLaura()) ui.page = 'riassunto';
   const y = window.scrollY, same = lastPage === ui.page;
-  m.innerHTML = ({ riassunto: pageRiassunto, inserisci: pageInserisci, dettaglio: pageDettaglio, impostazioni: pageImpostazioni })[ui.page]();
+  m.innerHTML = ({ riassunto: pageRiassunto, confronta: pageConfronta, inserisci: pageInserisci, dettaglio: pageDettaglio, impostazioni: pageImpostazioni })[ui.page]();
   lastPage = ui.page;
   if (ui.page === 'inserisci') updateDup('ins');
   if (ui.page === 'dettaglio') renderList();
@@ -1042,8 +1044,6 @@ function pageRiassunto() {
       if (!items.length) return '<div class="empty small muted" style="padding:24px 0;text-align:center">Nessuna spesa da mostrare</div>';
       return '<div class="dn">' + donut(items, totM) + '<div class="leg' + (withTot ? ' w' : '') + '">' + (withTot ? '<div class="small muted"><i style="background:none"></i><span></span><span></span><span class="a">al mese</span><span class="a">totale</span></div>' : '') + items.map(x => '<div style="--c:' + x.col + '"><i></i><span>' + h(x.c) + '</span><span class="p num">' + Math.round(x.v / totM * 100) + '%</span><span class="a num">' + eur(x.v) + '</span>' + (withTot ? '<span class="a num">' + eur(x.t) + '</span>' : '') + '</div>').join('') + '</div></div>';
     };
-    const sl = (lab, inner) => '<div class="slide"><div class="slide-l">' + lab + '</div>' + inner + '</div>';
-    const dots = labs => labs.length < 2 ? '' : '<div class="dots">' + labs.map((l, i) => '<button class="dot ' + (i ? '' : 'on') + '" data-act="slide" data-n="' + i + '" aria-label="' + h(l) + '"></button>').join('') + '</div>';
     const persone = S.persone.filter(p => p.riparto);
     const catSl = [['Media famiglia', donutBlock(R)]].concat(persone.map(p => [p.nome, donutBlock(C.riassunto(Object.assign({}, S, { spese: S.spese.filter(e => { const c = C.findCat(S, e.categoria); return c && norm(c.personaleDi) === norm(p.nome); }) }), {}), true)]));
     o += '<div class="sec-h"><h2>Andamento per categoria</h2><span class="small muted">media mensile su ' + R.media.n + ' mesi completi' + (persone.length ? ' · persone: solo le loro spese personali' : '') + '</span></div><div class="card">'
@@ -1059,6 +1059,8 @@ function pageRiassunto() {
   if (ys.length) o += '<div class="sec-h"><h2>Anni precedenti</h2><span class="small muted">totale di tutte le spese</span></div><div class="card" style="padding:4px 18px"><table class="kv"><tbody>' + ys.map(y => '<tr><td>' + y + '</td><td class="num">' + eur(yrs[y]) + '</td></tr>').join('') + '</tbody></table></div>';
   return o;
 }
+const sl = (lab, inner) => '<div class="slide"><div class="slide-l">' + lab + '</div>' + inner + '</div>';
+const dots = labs => labs.length < 2 ? '' : '<div class="dots">' + labs.map((l, i) => '<button class="dot ' + (i ? '' : 'on') + '" data-act="slide" data-n="' + i + '" aria-label="' + h(l) + '"></button>').join('') + '</div>';
 function donut(items, total) {
   const r = 62, cir = 2 * Math.PI * r; let off = 0;
   let s = '<svg viewBox="0 0 160 160" class="donut" role="img" aria-label="Ripartizione della media mensile per categoria"><g transform="rotate(-90 80 80)">';
@@ -1161,6 +1163,63 @@ function rowHtml(e) {
   const dd = e.data ? fmtDate(e.data).slice(0, e.data.slice(0, 4) === String(S.anno) ? 5 : 10) : '—';
   return '<button class="lr ' + (flag ? 'flag' : '') + '" ' + (e.anno ? 'style="cursor:default"' : 'data-edit="' + e.id + '"') + '><span class="d num">' + dd + '</span><span class="c" style="--c:' + catColor(e.categoria) + '"><i></i>' + h(e.categoria || '(nessuna categoria)') + '<span class="pg">' + h(e.pagato || '') + '</span></span>'
     + '<span class="s">' + h([e.dettaglio, e.vario].filter(Boolean).join(' · ') || '—') + '</span><span class="p">' + h(e.pagato || '') + '</span><span class="a num">' + eur(e.spesa) + '</span></button>';
+}
+
+/* ----------------------------------------------------------------- Confronta */
+const YCOL = ['#6a4cff', '#e8590c', '#1c9a6c', '#d6336c', '#1c7ed6', '#a37b00', '#7048e8', '#37b24d'];
+const cmpYears = () => [...new Set(S.storico.map(e => e.anno).filter(Boolean).concat(S.anno))].sort((a, b) => a - b);
+const cmpCats = () => S.categorie.filter(c => S.spese.concat(S.storico).some(e => norm(e.categoria) === norm(c.nome))).sort((a, b) => byName(a.nome, b.nome));
+function cmpState() {
+  if (!ui.cmp) ui.cmp = { anni: cmpYears().filter(y => y === S.anno || y === S.anno - 1), cats: cmpCats().filter(c => isIncluded(c)).map(c => c.nome) };
+  return ui.cmp;
+}
+function cmpMonthly(y, pred) {
+  const v = Array(12).fill(0), src = y === S.anno ? S.spese : S.storico.filter(e => e.anno === y);
+  for (const e of src) if (e.data && +e.data.slice(0, 4) === y && pred(e)) v[+e.data.slice(5, 7) - 1] += e.spesa;
+  return v;
+}
+function lineChart(series) {
+  const W = 600, H = 230, pl = 46, pr = 12, pt = 14, pb = 28;
+  const all = series.flatMap(x => x.vals.filter(v => v != null)), top = Math.max(...all, 1);
+  const X = i => pl + (W - pl - pr) * i / 11, Y = v => pt + (H - pt - pb) * (1 - v / top);
+  let g = '<svg class="col" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Confronto per mese">';
+  for (let k = 0; k <= 4; k++) {
+    const v = top * k / 4, yy = Y(v);
+    g += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + yy.toFixed(1) + '" y2="' + yy.toFixed(1) + '" stroke="var(--line)"/><text x="' + (pl - 6) + '" y="' + (yy + 4).toFixed(1) + '" text-anchor="end">' + Math.round(v).toLocaleString('it-IT') + '</text>';
+  }
+  MESI.forEach((m, i) => { g += '<text x="' + X(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + m + '</text>'; });
+  for (const x of series) {
+    let d = '', pen = false;
+    x.vals.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); pen = true; });
+    g += '<path d="' + d + '" fill="none" stroke="' + x.color + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
+    x.vals.forEach((v, i) => { if (v != null) g += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) + '" r="3.2" fill="' + x.color + '"><title>' + h(x.label) + ' · ' + MESI_LUNGHI[i] + ': ' + eur(v) + '</title></circle>'; });
+  }
+  return g + '</svg>';
+}
+function cmpChart(anni, pred) {
+  const now = new Date(), cm = now.getMonth() + 1, all = cmpYears();
+  const series = anni.map(y => {
+    const vals = cmpMonthly(y, pred), tot = vals.reduce((a, b) => a + b, 0);
+    return { label: String(y), color: YCOL[all.indexOf(y) % YCOL.length], tot, vals: y === now.getFullYear() ? vals.map((v, i) => i < cm ? v : null) : vals };
+  });
+  return lineChart(series) + '<div class="leg w2" style="margin-top:10px">' + series.map(x => '<div style="--c:' + x.color + '"><i></i><span>' + x.label + '</span><span class="a num">' + eur(x.tot) + '</span></div>').join('') + '</div>';
+}
+function pageConfronta() {
+  const c = cmpState(), yrs = cmpYears(), cats = cmpCats();
+  const chip = (on, act, attr, label, col) => '<button class="chip ' + (on ? 'on' : '') + '" data-act="' + act + '" ' + attr + ' style="--c:' + col + '" aria-pressed="' + on + '"><i></i>' + h(label) + '</button>';
+  let o = '<h1 class="ttl">Confronta</h1>'
+    + '<div class="card"><div class="card-h"><h3>Anni</h3><span class="muted small">scegli uno o più anni</span></div><div class="chips">'
+    + yrs.map(y => chip(c.anni.includes(y), 'cmpAnno', 'data-y="' + y + '"', y, YCOL[yrs.indexOf(y) % YCOL.length])).join('') + '</div></div>'
+    + '<div class="card"><div class="card-h"><h3>Categorie</h3><span class="muted small"><button class="pill-btn" data-act="cmpAll">Tutte</button> <button class="pill-btn" data-act="cmpNone">Nessuna</button></span></div><div class="chips">'
+    + cats.map(k => chip(c.cats.includes(k.nome), 'cmpCat', 'data-c="' + h(k.nome) + '"', k.nome, k.colore)).join('') + '</div></div>';
+  const anni = c.anni.slice().sort((a, b) => a - b), sel = cats.filter(k => c.cats.includes(k.nome));
+  if (!anni.length || !sel.length) return o + '<div class="card empty">Scegli almeno un anno e una categoria da confrontare.</div>';
+  const names = new Set(sel.map(k => norm(k.nome)));
+  if (sel.length === 1) return o + '<div class="sec-h"><h2>' + h(sel[0].nome) + '</h2><span class="small muted">spesa per mese</span></div><div class="card">' + cmpChart(anni, e => names.has(norm(e.categoria))) + '</div>';
+  const slides = sel.map(k => [k.nome, cmpChart(anni, e => norm(e.categoria) === norm(k.nome))]);
+  return o + '<div class="sec-h"><h2>Somma delle categorie</h2><span class="small muted">' + sel.length + ' categorie · spesa per mese</span></div><div class="card">' + cmpChart(anni, e => names.has(norm(e.categoria))) + '</div>'
+    + '<div class="sec-h"><h2>Confronto per categoria</h2><span class="small muted">scorri per vedere le singole categorie</span></div><div class="card"><div class="slides">'
+    + slides.map(x => sl(h(x[0]), x[1])).join('') + '</div>' + dots(slides.map(x => x[0])) + '</div>';
 }
 
 /* ----------------------------------------------------------------- Inserisci */
@@ -1377,6 +1436,10 @@ document.addEventListener('click', e => {
     case 'resetFil': ui.fil = { anno: '', cat: '', mese: '', pagato: '', min: '', max: '' }; ui.limit = 200; renderMain(); break;
     case 'more': ui.limit += 200; renderList(); break;
     case 'slide': { const sl = t.closest('.card').querySelector('.slides'); sl.scrollTo({ left: sl.clientWidth * +t.dataset.n, behavior: 'smooth' }); break; }
+    case 'cmpAnno': { const c = cmpState(), y = +t.dataset.y; c.anni = c.anni.includes(y) ? c.anni.filter(x => x !== y) : c.anni.concat(y); renderMain(); break; }
+    case 'cmpCat': { const c = cmpState(), n = t.dataset.c; c.cats = c.cats.includes(n) ? c.cats.filter(x => x !== n) : c.cats.concat(n); renderMain(); break; }
+    case 'cmpAll': cmpState().cats = cmpCats().map(k => k.nome); renderMain(); break;
+    case 'cmpNone': cmpState().cats = []; renderMain(); break;
     case 'toggleCat': { const m = catOnMap(), c = S.categorie.find(x => x.nome === t.dataset.c); m[c.nome] = !isIncluded(c); lsSet('catOn', JSON.stringify(m)); renderMain(); break; }
     case 'editPesi': ui.editPesi = +t.dataset.a; renderMain(); break;
     case 'cancelPesi': ui.editPesi = null; renderMain(); break;
