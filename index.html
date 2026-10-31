@@ -1006,12 +1006,13 @@ function isIncluded(c) { const m = catOnMap(); return c.nome in m ? !!m[c.nome] 
 const esclusi = () => new Set(S.categorie.filter(c => !isIncluded(c)).map(c => norm(c.nome)));
 
 function pageRiassunto() {
-  const esc = esclusi(), R = C.riassunto(S, { esclude: esc }), gj = C.daGiustificare(S), now = new Date();
+  const esc = esclusi(), R = C.riassunto(S, { esclude: esc }), RP = C.riparto(S), gj = C.daGiustificare(S), now = new Date();
   const curM = S.anno === now.getFullYear() ? now.getMonth() + 1 : 0, ended = S.anno < now.getFullYear();
   const usedCats = S.categorie.filter(c => S.spese.some(e => norm(e.categoria) === norm(c.nome))).sort((a, b) => byName(a.nome, b.nome));
   let o = '<h1 class="ttl">Riassunto</h1>';
   o += '<div class="card"><div class="hero"><span class="yr">Anno ' + S.anno + '</span><div><div class="k">Spese della famiglia</div><div class="v num">' + eur(R.tot.tot) + '</div></div>'
-    + '<div><div class="k">Media mensile · ' + R.media.n + (R.media.n === 1 ? ' mese completo' : ' mesi completi') + ' (' + (R.media.n === 1 ? MESI[0] : MESI[0] + '–' + MESI[R.media.n - 1]) + ')</div><div class="v alt num">' + eur(R.media.tot) + '</div></div></div></div>';
+    + '<div><div class="k">Media mensile · ' + R.media.n + (R.media.n === 1 ? ' mese completo' : ' mesi completi') + ' (' + (R.media.n === 1 ? MESI[0] : MESI[0] + '–' + MESI[R.media.n - 1]) + ')</div><div class="v alt num">' + eur(R.media.tot) + '</div></div>'
+    + '<div><div class="k">Spesa stimata su anno precedente (viaggi escl.) · al mese ' + eur(RP.mensili) + '</div><div class="v alt num">' + eur(RP.speseAnnuali) + '</div></div></div></div>';
   if (ended && !isLaura()) o += '<div class="msg warn"><b class="t">L\'anno ' + S.anno + ' è concluso</b>Archivia le spese in Impostazioni per iniziare il ' + (S.anno + 1) + '. <button class="btn sm sec" data-go="impostazioni" style="margin-left:6px">Vai a Impostazioni</button></div>';
   if (gj.length) {
     const tot = gj.reduce((s, x) => s + x.e.spesa, 0);
@@ -1241,7 +1242,7 @@ function submitIns() {
 
 /* ------------------------------------------------------------------ Dettaglio */
 function pageDettaglio() {
-  const cats = S.categorie.map(c => c.nome).sort(byName), f = ui.fil, yr = selYear();
+  const cats = S.categorie.map(c => c.nome).filter(n => !/^riassunto\b/i.test(n)).sort(byName), f = ui.fil, yr = selYear();
   const years = [...new Set(S.storico.map(e => e.anno).filter(Boolean).concat(S.anno))].sort((a, b) => b - a);
   const opt = (v, l, sel) => '<option value="' + h(v) + '" ' + (sel ? 'selected' : '') + '>' + h(l) + '</option>';
   return '<h1 class="ttl">Spese ' + yr + '</h1>'
